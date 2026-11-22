@@ -6,3 +6,7 @@ DerivedData/
 build/
 .build/
 .swiftpm/
+# 試作用のサンプル写真と変換結果（クレジット表の samples/CREDITS.md だけ入れる）
+samples/photos/
+samples/output/
+samples/style/
