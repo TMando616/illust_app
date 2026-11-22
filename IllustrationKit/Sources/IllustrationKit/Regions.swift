@@ -30,8 +30,11 @@ struct Regions {
     }
 
     /// 面積が `minArea` 未満の面を、一番長く接している隣の面の色の番号に塗り替える。
-    /// 小さな面が消えると、写真のざらつきや細かすぎる線が減る
-    static func mergeSmall(labels: [UInt8], width w: Int, height h: Int, minArea: Int, passes: Int = 3) -> [UInt8] {
+    /// 小さな面が消えると、写真のざらつきや細かすぎる線が減る。
+    /// `image` を渡すと、隣との色の差が `keepContrast` より大きい面は（極端に小さくなければ）残す。
+    /// 目やサングラスのように、小さくても特徴になる部分を消さないため
+    static func mergeSmall(labels: [UInt8], width w: Int, height h: Int, minArea: Int, passes: Int = 3,
+                           image: RGBAImage? = nil, keepContrast: Float = .infinity) -> [UInt8] {
         var labels = labels
         for _ in 0..<passes {
             let regions = Regions(labels: labels, width: w, height: h)
@@ -56,13 +59,21 @@ struct Regions {
             var regionLabel = [UInt8](repeating: 0, count: regions.count)
             for i in 0..<(w * h) { regionLabel[Int(regions.ids[i])] = labels[i] }
             var target = regionLabel
+            let colors = image.map { regions.meanColors(of: $0) }
+            let tinyArea = max(2, minArea / 8)
+            var changed = false
             for (small, counts) in neighbors {
-                if let best = counts.max(by: {
+                guard let best = counts.max(by: {
                     Double($0.value) * Double(area[$0.key]).squareRoot() < Double($1.value) * Double(area[$1.key]).squareRoot()
-                }) {
-                    target[small] = regionLabel[best.key]
+                }) else { continue }
+                if let colors, area[small] >= tinyArea,
+                   ColorQuantizer.distanceSquared(colors[small], colors[best.key]) > keepContrast * keepContrast {
+                    continue
                 }
+                target[small] = regionLabel[best.key]
+                changed = true
             }
+            guard changed else { break }
             for i in 0..<(w * h) { labels[i] = target[Int(regions.ids[i])] }
         }
         return labels

@@ -44,7 +44,7 @@ func hex(_ c: SIMD3<Float>) -> String {
 }
 
 // 画風の一覧
-var styles: [IllustrationStyle] = [.basic]
+var styles: [IllustrationStyle] = [.basic, .pastel]
 var palette: [SIMD3<Float>] = []
 if let paletteDir {
     let samples = try loadImages(in: paletteDir).map { RGBAImage($0.image, context: context) }
@@ -53,7 +53,7 @@ if let paletteDir {
         alpha > 200 && c.min() < 235 && (c * SIMD3(0.299, 0.587, 0.114)).sum() > 70
     }
     print("お手本から拾った色: \(palette.map(hex).joined(separator: " "))")
-    styles.append(IllustrationStyle(id: "palette", name: "お手本の色に寄せる", palette: palette, paletteBlend: 0.5))
+    styles.append(IllustrationStyle(id: "palette", name: "パステル＋お手本の色", palette: palette, paletteBlend: 0.3, pastel: 0.8))
 }
 
 // 変換

@@ -22,32 +22,45 @@ public struct Illustrator: @unchecked Sendable {
         // 半径や線の太さは長辺1024pxを基準に決めてあるので、解像度に合わせて伸び縮みさせる
         let unit = Double(max(w, h)) / 1024
 
-        // 平滑化
-        var smooth = source
-        let radius = max(1, Int((Double(style.smoothingRadius) * unit).rounded()))
-        for _ in 0..<style.smoothingPasses { smooth = Kuwahara.apply(smooth, radius: radius) }
+        // 面に分ける（デフォルメ）。面の分け方は小さく縮めた画像で決める。
+        // 縮めると細部が消えて面が大きくまとまり、拡大して戻したときに形も単純になる
+        let segSource = RGBAImage(downscale(scaled, maxLongSide: CGFloat(style.segmentationLongSide)), context: context)
+        let sw = segSource.width, sh = segSource.height
+        var smooth = segSource
+        for _ in 0..<style.smoothingPasses { smooth = Kuwahara.apply(smooth, radius: style.smoothingRadius) }
 
-        // 面に分ける：色数を減らして色の番号を振り、小さな粒と小さな面を隣にまとめる。
+        // 色数を減らして色の番号を振り、小さな粒と小さな面を隣にまとめる。
         // 色数を減らすのは「面の分け方」を決めるためで、塗る色は面ごとの平均色にする
         // （代表色で塗ると、背景の大きな面に色を取られて肌や髪の色がずれるため）
         let centers = ColorQuantizer.centroids(of: [smooth], count: style.colorCount)
-        var labels = ColorQuantizer.labels(of: smooth, centers: centers)
-        let modeRadius = max(1, Int((2 * unit).rounded()))
-        for _ in 0..<2 {
-            labels = ColorQuantizer.modeFilter(labels, width: w, height: h, colors: centers.count, radius: modeRadius)
+        var small = ColorQuantizer.labels(of: smooth, centers: centers)
+        small = ColorQuantizer.modeFilter(small, width: sw, height: sh, colors: centers.count, radius: 1)
+        // 小さくても周りと色の差がはっきりした面（目・サングラスなど）は特徴として残す
+        small = Regions.mergeSmall(labels: small, width: sw, height: sh,
+                                   minArea: max(4, Int(Double(sw * sh) * style.minRegionFraction)),
+                                   image: smooth, keepContrast: style.keepContrast)
+
+        // 元の大きさに戻し、境目をならして丸みのある形にする
+        var labels = [UInt8](repeating: 0, count: w * h)
+        for y in 0..<h {
+            let sy = min(sh - 1, y * sh / h)
+            for x in 0..<w { labels[y * w + x] = small[sy * sw + min(sw - 1, x * sw / w)] }
         }
-        labels = Regions.mergeSmall(labels: labels, width: w, height: h,
-                                    minArea: max(4, Int(Double(w * h) * style.minRegionFraction)))
+        let roundRadius = max(1, Int((Double(style.shapeRounding) * unit).rounded()))
+        for _ in 0..<2 {
+            labels = ColorQuantizer.modeFilter(labels, width: w, height: h, colors: centers.count, radius: roundRadius)
+        }
         let regions = Regions(labels: labels, width: w, height: h)
 
-        // 面ごとの色（＋パレットへ寄せる）
-        var colors = regions.meanColors(of: smooth)
+        // 面ごとの色（＋パレットへ寄せる・パステル調にする）
+        var colors = regions.meanColors(of: source)
         if !style.palette.isEmpty, style.paletteBlend > 0 {
             colors = colors.map { c in
                 let p = style.palette[ColorQuantizer.nearestIndex(c, style.palette)]
                 return c + (p - c) * style.paletteBlend
             }
         }
+        if style.pastel > 0 { colors = colors.map { Pastel.apply($0, amount: style.pastel) } }
 
         // 線画：面の境目のうち、色の差がはっきりしているところだけに線を引く
         let width = (lineWidth ?? style.defaultLineWidth) * unit
